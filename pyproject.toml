@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elliptic-gnn-fraud"
+version = "0.1.0"
+description = "Temporal GNN benchmarks for illicit transaction classification on Elliptic"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scikit-learn>=1.2",
+    "torch>=2.0",
+    "torch-geometric>=2.6,<3",
+    "xgboost>=1.7",
+]
+
+[project.scripts]
+gnn-fraud = "gnn_fraud.cli:main"
+
+[tool.setuptools]
+packages = ["gnn_fraud"]

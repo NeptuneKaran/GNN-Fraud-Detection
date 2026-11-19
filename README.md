@@ -1,61 +1,59 @@
-# GNN Fraud Detection
+# Elliptic transaction classification
 
-This repository implements a highly scalable Graph Neural Network (GNN) pipeline to detect illicit financial transactions (e.g., money laundering, fraud) in the Elliptic Bitcoin dataset. 
+GraphSAGE, GCN, and GAT classify Bitcoin transactions as licit or illicit using the Elliptic graph. A class-weighted XGBoost model provides a tabular baseline.
 
-By modeling financial transactions as a graph and employing relational inductive biases, this project demonstrates how graph-based learning significantly outperforms traditional tabular machine learning (like XGBoost) in identifying obfuscated fraud patterns.
+## Run
 
-## Advanced Features
-- **Temporal Graph Processing:** Strict chronological train/test splitting across 49 timesteps to prevent time-travel data leakage.
-- **Continual Learning (Rolling Window):** Simulates real-world production by incrementally fine-tuning the model through future timesteps using a **Historical Replay Buffer** to combat concept drift.
-- **Threshold Calibration:** Sweeps validation probabilities to dynamically calibrate the decision boundary rather than relying on a naïve 0.5 threshold, heavily suppressing alert fatigue.
-- **Multiple GNN Architectures:** Implementations of **GraphSAGE**, **GCN**, and **GAT** using PyTorch Geometric.
-- **Class Imbalance Mitigation:** Integrated custom **Focal Loss** ($\alpha=0.85$, $\gamma=2.0$) to handle extreme minority classes (~2% illicit nodes).
+From the repository root, in a Python 3.10+ environment:
 
-## Benchmark Results (Rolling Window + Calibration)
-
-To combat the degradation of static models over time (Concept Drift), the models were evaluated using the Rolling Window Incremental Trainer alongside Threshold Calibration. 
-
-**GraphSAGE** emerged as a production-grade architecture, slashing the False Positive Rate to under 1% while maximizing overall accuracy.
-
-| Metric                 | GraphSAGE (Best) | GCN      | GAT      |
-| :--------------------- | :--------------- | :------- | :------- |
-| **Macro F1 Score**     | **0.8308**       | 0.6787   | 0.8084   |
-| **PR-AUC**             | **0.7159**       | 0.4043   | 0.6706   |
-| **Recall (Illicit)**   | **0.5753**       | 0.2918   | 0.5596   |
-| **False Positive Rate**| **0.0081**       | 0.0146   | 0.0134   |
-| **Threshold Used**     | 0.73             | 0.67     | 0.66     |
-
-## Installation
-
-1. Clone this repository.
-2. Install the required dependencies:
 ```bash
-pip install torch torch_geometric scikit-learn matplotlib seaborn numpy pandas
+python -m pip install -r requirements.txt
+python main.py --model all --device cpu
 ```
 
-## Usage
+PyTorch Geometric downloads the public dataset into `data/` on the first run. Use `--data-dir` to point at an existing Elliptic cache. Each run writes metrics and a confusion matrix to `runs/` by default. Use `--output-dir` to keep experiments with different settings.
 
-The dataset (Elliptic Bitcoin Dataset) is automatically downloaded and processed on the first run via PyTorch Geometric.
-
-You can train and evaluate the models using the CLI entry point `main.py`.
-
-### 1. Rolling Window Training (Recommended)
-Train incrementally on the test set (timesteps 35-49) using the Replay Buffer and calibrate the optimal decision threshold:
 ```bash
-python main.py --model GraphSAGE --epochs 100 --calibrate --rolling
+python main.py --model GraphSAGE --loss weighted_ce --device cpu --output-dir runs/weighted
+python main.py --model GraphSAGE --rolling --device cpu
+python -m unittest discover -s tests -v
 ```
 
-### 2. Static Training
-Train a standard static model on timesteps 1-34 and evaluate directly on timesteps 35-49:
-```bash
-python main.py --model GAT --epochs 150 --calibrate
-```
+The default GNN settings are 100 initial epochs, focal loss, seed 42, and four CPU threads. Calibration is enabled by default. `--no-calibrate` uses 0.50. The same options are available through `python -m gnn_fraud` or the installed `gnn-fraud` command. `--model all --rolling` runs the three GNNs.
 
-## Repository Structure
-- `main.py`: CLI entry point for training and evaluation.
-- `dataset.py`: Handles dataset downloading, temporal splitting, feature normalization, and timestep extraction.
-- `rolling_window.py`: Implements Continual Learning loops and the Replay Buffer.
-- `models.py`: Defines GraphSAGE, GCN, and GAT architectures.
-- `losses.py`: Implements custom Focal Loss.
-- `train.py`: Standard PyTorch static training loop.
-- `evaluate.py`: Calculates metrics, calibrates thresholds, and generates confusion matrices.
+## Evaluation protocol
+
+| Split | Timesteps | Labeled transactions |
+| --- | --- | ---: |
+| Training | 1–30 | 26,905 |
+| Validation | 31–34 | 2,989 |
+| Test | 35–49 | 16,670 |
+
+The scaler and class weights use the training split. The GNN checkpoint is selected by validation average precision, and the classification threshold is selected by validation Macro F1. Unlabeled nodes remain in their own timestep graphs as neighbors.
+
+In static mode the model scores the entire held-out period without updating. In rolling mode the GNN scores each timestep before using its labels for ten adaptation epochs with replay. Both modes keep the validation cutoff fixed during testing.
+
+## Benchmark
+
+Fresh CPU runs with seed 42 and default settings. Each model uses its own validation cutoff.
+
+| Static model | Macro F1 | False-positive rate | Illicit recall | PR-AUC |
+| --- | ---: | ---: | ---: | ---: |
+| GraphSAGE | 0.7313 | 4.72% | 56.23% | 0.3436 |
+| GCN | 0.7148 | 3.79% | 47.09% | 0.3101 |
+| GAT | 0.6992 | 3.54% | 42.11% | 0.3799 |
+| XGBoost | 0.8781 | 1.08% | 72.48% | 0.7886 |
+
+GraphSAGE had the highest Macro F1 and recall of the static GNNs. GCN and GAT produced fewer false alerts, and XGBoost led the static comparison overall.
+
+GraphSAGE with weighted cross-entropy reached 0.7222 Macro F1 and 4.39% false-positive rate. With focal loss and rolling updates it reached 0.8135 Macro F1, 3.98% false-positive rate, and 76.64% recall. The rolling run assumes that labels from a scored timestep are available before the next one.
+
+## Code map
+
+| File | Responsibility |
+| --- | --- |
+| [`gnn_fraud/cli.py`](gnn_fraud/cli.py) | Experiment settings and result files |
+| [`gnn_fraud/data.py`](gnn_fraud/data.py) | Transaction labels, temporal splits, and feature scaling |
+| [`gnn_fraud/models.py`](gnn_fraud/models.py), [`losses.py`](gnn_fraud/losses.py) | GNN architectures and imbalance handling |
+| [`gnn_fraud/training.py`](gnn_fraud/training.py), [`rolling.py`](gnn_fraud/rolling.py) | Initial training and online adaptation |
+| [`gnn_fraud/metrics.py`](gnn_fraud/metrics.py), [`baseline.py`](gnn_fraud/baseline.py) | Threshold selection, reporting, and XGBoost |

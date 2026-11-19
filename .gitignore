@@ -1,13 +1,11 @@
-# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
+.venv/
 venv/
+build/
+dist/
+*.egg-info/
 .env
-
-# Dataset
 data/
-
-# Mac
+runs/
 .DS_Store
